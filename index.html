@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>FM100-lite Симулятор (HSL) — лабораторний інструмент</title>
+<!--
+  FM100-lite (освітній симулятор сортування відтінків за принципом Farnsworth–Munsell)
+  • Працює повністю офлайн (один HTML-файл).
+  • Без сторонніх бібліотек, все на чистому JS.
+  • Легко редагувати: див. секцію CONFIG нижче.
+  © Будь ласка, використовуй у навчальних цілях; не є медичним інструментом.
+-->
+<style>
+  :root{
+    --chip-size: 28px;        /* Розмір плиток */
+    --gap: 6px;               /* Відступи між плитками */
+    --anchor-ring: 3px;       /* Обвід якорів */
+    --ui: #2b7cff;            /* Акцентний колір UI/графіка */
+  }
+  * { box-sizing: border-box }
+  body{
+    margin:0; font-family: system-ui, Segoe UI, Roboto, Arial, sans-serif;
+    background:#111; color:#eee;
+  }
+  header{
+    position:sticky; top:0; z-index:9;
+    padding:16px 20px;
+    background:rgba(0,0,0,0.6);
+    backdrop-filter: blur(8px);
+    border-bottom:1px solid rgba(255,255,255,0.1);
+  }
+  h1{margin:0 0 8px; font-size:18px}
+  .controls{display:flex; flex-wrap:wrap; gap:10px; align-items:center}
+  .controls label{font-size:13px; opacity:0.95}
+  .controls select, .controls input[type="range"]{
+    vertical-align:middle;
+  }
+  .controls input[type="color"]{
+    width:40px; height:28px; padding:0; border:none; background:transparent;
+  }
+  .badge{
+    font-size:11px; padding:4px 8px; border-radius:999px;
+    background:#242424; border:1px solid rgba(255,255,255,0.08)
+  }
+  .btn{
+    background:var(--ui); color:#fff; border:none; padding:8px 12px; border-radius:8px;
+    cursor:pointer; font-weight:600;
+  }
+  .btn.secondary{ background:#3a3a3a }
+  .btn:disabled{ opacity:0.5; cursor:not-allowed }
+  .panel{ padding:16px 20px; display:grid; gap:14px }
+  .note{ font-size:12px; opacity:0.85 }
+  .row-wrap{ display:flex; align-items:center; gap:10px; flex-wrap:wrap }
+  .row-title{ min-width:80px; font-size:13px; opacity:0.9 }
+  .row{
+    display:flex; gap:var(--gap); align-items:center; flex-wrap:nowrap; overflow:auto; padding:8px;
+    background: rgba(255,255,255,0.06); border:1px dashed rgba(255,255,255,0.2); border-radius:10px;
+  }
+  .chip{
+    width:var(--chip-size); height:var(--chip-size); border-radius:6px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
+    cursor:grab; user-select:none;
+  }
+  .chip.anchor{ outline: var(--anchor-ring) solid #fff; outline-offset: 1px; cursor:default }
+  .chip.dragging{ opacity:0.72; transform: scale(1.08) }
+  .grid{ display:grid; gap:10px }
+  .two{ grid-template-columns: 1fr 1fr }
+  .card{
+    background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+    border-radius:12px; padding:12px
+  }
+  .chart-box{ display:flex; align-items:center; justify-content:center; padding:10px }
+  svg{ max-width:100%; height:auto }
+  details summary{ cursor:pointer }
+  .kbd{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background:#1e1e1e; border:1px solid #333; border-radius:6px; padding:2px 6px; font-size:12px }
+  footer{ text-align:center; padding:12px 0 18px; opacity:.7; font-size:12px }
+</style>
+</head>
+<body>
+<header>
+  <h1>FM100-lite Симулятор (HSL) — лабораторний інструмент</h1>
+  <div class="controls">
+    <label>Око:
+      <select id="eyeSel">
+        <option>Праве</option><option>Ліве</option><option selected>Обидва</option>
+      </select>
+    </label>
+    <label>Відстань:
+      <select id="distSel">
+        <option>Близька</option><option>Далека</option>
+      </select>
+    </label>
+    <label>Фон:
+      <select id="bgSel">
+        <option value="#ffffff">Світлий (білий)</option>
+        <option value="#1a1a1a" selected>Темний (чорний)</option>
+        <option value="#808080">Сірий</option>
+        <option value="custom">Інший колір…</option>
+      </select>
+      <input type="color" id="bgColor" value="#0d1b2a" style="display:none">
+    </label>
+    <label>Насиченість, %:
+      <input type="range" id="sat" min="10" max="100" value="100"/>
+      <span id="satVal" class="badge">100%</span>
+    </label>
+    <label>Світлість (L), %:
+      <input type="range" id="light" min="25" max="70" value="50"/>
+      <span id="lightVal" class="badge">50%</span>
+    </label>
+    <!-- Якщо хочеш міняти геометрію, редагуй CONFIG у JS; тут залишаємо спрощено -->
+    <button class="btn" id="startBtn">Перемішати / Почати</button>
+    <button class="btn secondary" id="finishBtn" disabled>Завершити → Оцінити</button>
+  </div>
+</header>
+
+<section class="panel">
+  <div class="note">
+    Порада: перетягай плитки за <strong>≤ 2–3 с</strong> на крок і без скасувань, щоб уникнути «ідеального кола».
+    Перший і останній чип у кожному ряду — <em>якорі</em> (не рухаються).
+  </div>
+
+  <div id="rows"></div>
+
+  <div class="grid two">
+    <div class="card">
+      <div><strong>Результати</strong> — <span id="meta" class="note"></span></div>
+      <div id="scoreBox" class="note" style="margin-top:6px"></div>
+      <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
+        <button class="btn secondary" id="exportBtn" disabled>Експорт (JSON)</button>
+        <button class="btn secondary" id="saveChartBtn" disabled>Завантажити графік (PNG)</button>
+      </div>
+    </div>
+    <div class="card chart-box">
+      <svg id="polar" width="420" height="420" viewBox="0 0 420 420" aria-label="Полярний графік помилок"></svg>
+    </div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary><strong>Як це працює?</strong></summary>
+      <p class="note">
+        Це навчальна симуляція за принципом Farnsworth–Munsell: кілька рядів утворюють коло відтінків (HSL).
+        Ти перетягуєш плитки між двома «якорями», щоб перехід був плавний. Після «Завершити» програма порівнює
+        твій порядок із еталоном, обчислює похибку (за індексом) і будує полярну діаграму: кут = відтінок (hue),
+        радіус = локальна помилка.
+      </p>
+      <p class="note">
+        У звіті вказуй: умови (око/відстань/фон/насиченість/світлість), загальну помилку, пікові сектори та висновки.
+      </p>
+    </details>
+  </div>
+</section>
+
+<footer>FM100-lite • один файл • редагуй в улюбленому редакторі. Гарних експериментів!</footer>
+
+<script>
+'use strict';
+
+/* ========================= CONFIG (редагуй сміливо) =========================
+   rows: кількість рядів;
+   chipsPerRow: скільки плиток у ряду (включно з 2 якорями, які не рухаються);
+   startHues: з яких кутів (у градусах) стартують ряди. Якщо залишити null —
+              будуть рівномірно розкидані по колу (0..360).
+   uiColor: колір графіків/точок/ліній.
+============================================================================= */
+const CONFIG = {
+  rows: 4,
+  chipsPerRow: 21,              // має бути ≥ 3; зручно 21
+  startHues: null,              // напр.: [0, 90, 180, 270] або null для автогена
+  uiColor: getComputedStyle(document.documentElement).getPropertyValue('--ui') || '#2b7cff'
+};
+/* ========================================================================== */
+
+const rowsEl = document.getElementById('rows');
+const bgSel = document.getElementById('bgSel');
+const bgColor = document.getElementById('bgColor');
+const sat = document.getElementById('sat');
+const light = document.getElementById('light');
+const satVal = document.getElementById('satVal');
+const lightVal = document.getElementById('lightVal');
+const startBtn = document.getElementById('startBtn');
+const finishBtn = document.getElementById('finishBtn');
+const exportBtn = document.getElementById('exportBtn');
+const saveChartBtn = document.getElementById('saveChartBtn');
+const eyeSel = document.getElementById('eyeSel');
+const distSel = document.getElementById('distSel');
+const polar = document.getElementById('polar');
+const scoreBox = document.getElementById('scoreBox');
+const meta = document.getElementById('meta');
+
+let solution = [];        // Еталон: масив об'єктів {id,row,trueIndex,hue,isAnchor}
+let startedAt = null;     // Час початку серії
+
+function hsl(h,s,l){ return `hsl(${h}, ${s}%, ${l}%)`; }
+
+function getStartHues(){
+  if (Array.isArray(CONFIG.startHues) && CONFIG.startHues.length === CONFIG.rows) {
+    return CONFIG.startHues.slice();
+  }
+  // рівномірний розподіл по колу
+  return Array.from({length: CONFIG.rows}, (_,i)=> i*(360/CONFIG.rows));
+}
+
+function buildSolution(){
+  solution = [];
+  const hues = getStartHues();
+  const stepPerRow = 360/CONFIG.rows/(CONFIG.chipsPerRow - 1); // щоб сумарно дало повне коло
+  hues.forEach((h0,rowIdx)=>{
+    for(let i=0;i<CONFIG.chipsPerRow;i++){
+      const isAnchor = (i===0 || i===CONFIG.chipsPerRow-1);
+      solution.push({
+        id:`R${rowIdx}_I${i}`,
+        row: rowIdx,
+        trueIndex: i,
+        hue: (h0 + i*stepPerRow) % 360,
+        isAnchor
+      });
+    }
+  });
+}
+
+function paintBackground(){
+  let val = bgSel.value;
+  if(val==='custom'){ bgColor.style.display='inline-block'; val = bgColor.value; }
+  else bgColor.style.display='none';
+  document.body.style.background = val;
+}
+
+function buildRows(){
+  rowsEl.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for(let r=0;r<CONFIG.rows;r++){
+    const wrap = document.createElement('div');
+    wrap.className='row-wrap';
+    const title = document.createElement('div');
+    title.className='row-title';
+    title.textContent = `Ряд ${r+1}`;
+    const row = document.createElement('div');
+    row.className='row'; row.dataset.row=r;
+
+    // Взяли всі елементи цього ряду
+    const items = solution.filter(x=>x.row===r).map(x=>({...x}));
+    // Перемішуємо лише середні (якорі лишаються на краях)
+    const middle = items.slice(1, -1).sort(()=>Math.random()-0.5);
+    const order = [items[0], ...middle, items[items.length-1]];
+    order.forEach((x,idx)=>{
+      const el = document.createElement('div');
+      el.className = 'chip' + (x.isAnchor?' anchor':'');
+      el.draggable = !x.isAnchor;
+      el.dataset.id = x.id;
+      el.dataset.row = r;
+      el.dataset.index = idx;
+      el.style.background = hsl(x.hue, sat.value, light.value);
+      // DnD
+      el.addEventListener('dragstart', (e)=>{
+        if (x.isAnchor) { e.preventDefault(); return; }
+        el.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', JSON.stringify({id:x.id,row:r}));
+      });
+      el.addEventListener('dragend', ()=> el.classList.remove('dragging'));
+      row.appendChild(el);
+    });
+
+    // Прийом DnD: вставляємо перетягувану плитку перед першою, що правіше курсора
+    row.addEventListener('dragover', (e)=>{
+      e.preventDefault();
+      const dragging = document.querySelector('.chip.dragging');
+      if(!dragging) return;
+      const rects = [...row.querySelectorAll('.chip:not(.anchor)')].map(el=>({el,rect:el.getBoundingClientRect()}));
+      const x = e.clientX;
+      let target = null;
+      for(const {el,rect} of rects){
+        const mid = rect.left + rect.width/2;
+        if(x<mid){ target = el; break; }
+      }
+      if(target) row.insertBefore(dragging, target);
+      else row.insertBefore(dragging, row.querySelector('.chip.anchor:last-of-type'));
+    });
+
+    wrap.appendChild(title);
+    wrap.appendChild(row);
+    frag.appendChild(wrap);
+  }
+  rowsEl.appendChild(frag);
+}
+
+function recolorChips(){
+  document.querySelectorAll('.chip').forEach(el=>{
+    const x = solution.find(o=>o.id===el.dataset.id);
+    if(x) el.style.background = hsl(x.hue, sat.value, light.value);
+  });
+}
+
+function readCurrent(){
+  const current = [];
+  document.querySelectorAll('.row').forEach(row=>{
+    const r = parseInt(row.dataset.row,10);
+    const chips = [...row.querySelectorAll('.chip')];
+    chips.forEach((el,idx)=>{
+      const base = solution.find(o=>o.id===el.dataset.id);
+      current.push({
+        id: el.dataset.id, row:r, index:idx,
+        hue: base.hue, trueIndex: base.trueIndex, isAnchor: base.isAnchor
+      });
+    });
+  });
+  return current;
+}
+
+function score(){
+  const current = readCurrent();
+  let totalErr = 0;
+  const points = [];
+  let movableCount = 0;
+  current.forEach(item=>{
+    const err = item.isAnchor ? 0 : Math.abs(item.index - item.trueIndex);
+    if(!item.isAnchor){ totalErr += err; movableCount++; }
+    points.push({h:item.hue, e:err});
+  });
+  const maxPerRow = CONFIG.chipsPerRow - 3 + (CONFIG.chipsPerRow - 2); // верхня груба оцінка (не використ.)
+  const theoreticalMax = CONFIG.rows * (CONFIG.chipsPerRow - 2) * (CONFIG.chipsPerRow - 3) / 2; // простий upper bound
+  const mad = movableCount ? (totalErr / movableCount) : 0;
+  const pct = theoreticalMax ? (100*totalErr/theoreticalMax) : 0;
+  return { totalErr, points, mad, pct, current, movableCount, theoreticalMax };
+}
+
+function drawPolar(points){
+  const cx=210, cy=210, R=180;
+  while(polar.firstChild) polar.removeChild(polar.firstChild);
+
+  // кола сітки
+  const circle = (r, stroke, opacity)=>{
+    const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',cx); c.setAttribute('cy',cy); c.setAttribute('r',r);
+    c.setAttribute('fill','none'); c.setAttribute('stroke',stroke); c.setAttribute('opacity',opacity);
+    polar.appendChild(c);
+  };
+  circle(R, '#666', 0.25);
+  circle(R*0.66, '#666', 0.18);
+  circle(R*0.33, '#666', 0.12);
+
+  // осі кожні 30°
+  for(let a=0;a<360;a+=30){
+    const rad = a*Math.PI/180;
+    const x2 = cx + Math.cos(rad)*R;
+    const y2 = cy + Math.sin(rad)*R;
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',cx); line.setAttribute('y1',cy);
+    line.setAttribute('x2',x2); line.setAttribute('y2',y2);
+    line.setAttribute('stroke','#666'); line.setAttribute('opacity','0.2');
+    polar.appendChild(line);
+  }
+
+  // масштабування помилок
+  const maxErr = Math.max(1, ...points.map(p=>p.e));
+  const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+  let d='';
+
+  const ui = CONFIG.uiColor.toString().trim() || '#2b7cff';
+  points.slice().sort((a,b)=>a.h-b.h).forEach((p,i)=>{
+    const rad = p.h*Math.PI/180;
+    const r = (p.e/maxErr)*R;
+    const x = cx + Math.cos(rad)*r;
+    const y = cy + Math.sin(rad)*r;
+    d += (i? ' L ':' M ')+x+' '+y;
+    const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    dot.setAttribute('cx',x); dot.setAttribute('cy',y); dot.setAttribute('r',3);
+    dot.setAttribute('fill', ui);
+    polar.appendChild(dot);
+  });
+  path.setAttribute('d', d+' Z');
+  path.setAttribute('fill', 'rgba(43,124,255,0.18)');
+  path.setAttribute('stroke', ui);
+  polar.appendChild(path);
+}
+
+function exportJSON(payload){
+  const blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `fm100lite_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function saveSVGasPNG(){
+  const svgData = new XMLSerializer().serializeToString(polar);
+  const img = new Image();
+  const svgBlob = new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
+  const url = URL.createObjectURL(svgBlob);
+  img.onload = function(){
+    const canvas = document.createElement('canvas');
+    canvas.width = 1000; canvas.height = 1000;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = getComputedStyle(document.body).backgroundColor || '#111';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    // центроване розміщення
+    ctx.drawImage(img, (canvas.width-420)/2, (canvas.height-420)/2, 420, 420);
+    const a = document.createElement('a');
+    a.download = `fm100lite_polar_${new Date().toISOString().replace(/[:.]/g,'-')}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+}
+
+/* =============================== ПОДІЇ UI ================================ */
+bgSel.addEventListener('change', paintBackground);
+bgColor.addEventListener('input', paintBackground);
+sat.addEventListener('input', ()=>{ satVal.textContent=sat.value+'%'; recolorChips(); });
+light.addEventListener('input', ()=>{ lightVal.textContent=light.value+'%'; recolorChips(); });
+
+startBtn.addEventListener('click', ()=>{
+  buildSolution();
+  buildRows();
+  recolorChips();
+  startedAt = Date.now();
+  finishBtn.disabled = false;
+  exportBtn.disabled = true;
+  saveChartBtn.disabled = true;
+  meta.textContent =
+    `Око: ${eyeSel.value} • Відстань: ${distSel.value} • Фон: ` +
+    `${bgSel.value==='custom' ? bgColor.value : bgSel.options[bgSel.selectedIndex].text} • ` +
+    `S=${sat.value}% • L=${light.value}% • Рядів=${CONFIG.rows}, На ряд=${CONFIG.chipsPerRow}`;
+  scoreBox.textContent = 'Тест триває…';
+});
+
+finishBtn.addEventListener('click', ()=>{
+  const t = score();
+  drawPolar(t.points);
+  const sec = ((Date.now()-startedAt)/1000).toFixed(1);
+  const peaks = t.points.slice().sort((a,b)=>b.e-a.e).slice(0,5).map(p=>`${Math.round(p.h)}°→${p.e}`).join(', ');
+  scoreBox.innerHTML =
+    `Загальна похибка: <strong>${t.totalErr}</strong> | MAD: ${t.mad.toFixed(2)} | `+
+    `Нормалізовано: ${(t.pct).toFixed(1)}%<br/>Час: ${sec} с<br/>`+
+    `<span class="note">Топ піків: ${peaks || '—'}</span>`;
+  exportBtn.disabled = false;
+  saveChartBtn.disabled = false;
+});
+
+exportBtn.addEventListener('click', ()=>{
+  const cur = readCurrent();
+  const payload = {
+    meta: {
+      eye: eyeSel.value, distance: distSel.value,
+      background: (bgSel.value==='custom'?bgColor.value:bgSel.value),
+      saturation: +sat.value, lightness: +light.value,
+      rows: CONFIG.rows, chipsPerRow: CONFIG.chipsPerRow,
+      date: new Date().toISOString()
+    },
+    solution, current: cur
+  };
+  exportJSON(payload);
+});
+
+saveChartBtn.addEventListener('click', saveSVGasPNG);
+
+/* ============================== ІНІЦІАЛІЗАЦІЯ ============================ */
+paintBackground();
+buildSolution(); buildRows(); recolorChips();
+</script>
+</body>
+</html>
